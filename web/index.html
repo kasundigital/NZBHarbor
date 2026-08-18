@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <title>NZBHarbor</title>
+  <link rel="icon" href="/logo.svg">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><img src="/logo.svg" alt="NZBHarbor"><div><b>NZBHarbor</b><small>Usenet downloader</small></div></div>
+    <nav>
+      <button class="nav active" data-view="dashboard">Dashboard</button>
+      <button class="nav" data-view="queue">Queue</button>
+      <button class="nav" data-view="history">History</button>
+      <button class="nav" data-view="servers">Servers</button>
+      <button class="nav" data-view="help">Help & Troubleshooting</button>
+    </nav>
+    <div class="version">v0.1.0 • Docker-first</div>
+  </aside>
+  <main>
+    <header><div><h1 id="title">Dashboard</h1><p id="subtitle">Your Usenet download harbor.</p></div><button id="addBtn" class="primary">+ Add NZB</button></header>
+    <div id="notice" class="notice hidden"></div>
+    <section id="dashboard" class="view active">
+      <div class="stats">
+        <div class="card"><span>Queue</span><strong id="statQueue">0</strong></div>
+        <div class="card"><span>Completed</span><strong id="statDone">0</strong></div>
+        <div class="card"><span>Failed</span><strong id="statFailed">0</strong></div>
+        <div class="card"><span>Servers</span><strong id="statServers">0</strong></div>
+      </div>
+      <div class="panel"><div class="panelhead"><h2>Active downloads</h2><button onclick="refresh()">Refresh</button></div><div id="activeJobs" class="jobs"></div></div>
+    </section>
+    <section id="queue" class="view"><div class="panel"><h2>Download queue</h2><div id="queueJobs" class="jobs"></div></div></section>
+    <section id="history" class="view"><div class="panel"><h2>History</h2><div id="historyJobs" class="jobs"></div></div></section>
+    <section id="servers" class="view">
+      <div class="panel"><div class="panelhead"><div><h2>Usenet servers</h2><p class="muted">Primary providers use lower priority numbers. Fill providers use higher numbers.</p></div><button onclick="addServer()">+ Add server</button></div><div id="serverRows"></div><div class="rowBtns"><button class="primary" onclick="saveServers()">Save configuration</button></div><div class="callout">Use this API key when adding NZBHarbor to Sonarr/Radarr as a <b>SABnzbd</b> client.</div><label>API key<div class="inline"><input id="apiKey" readonly><button onclick="copyKey()">Copy</button></div></label></div>
+    </section>
+    <section id="help" class="view">
+      <div class="panel docs"><h2>Quick setup</h2><ol><li>Add and test a Usenet server under <b>Servers</b>.</li><li>Upload a small NZB and confirm it reaches Completed.</li><li>In Sonarr/Radarr select <b>SABnzbd</b>, host <code>nzbharbor</code>, port <code>6789</code>, and enter this app's API key.</li><li>Use category <code>tv</code> for Sonarr and <code>movies</code> for Radarr.</li></ol><h2>Troubleshooting</h2><h3>Downloads fail immediately</h3><p>Check provider hostname, TLS port, credentials, and Docker DNS. Run <code>docker logs -f nzbharbor</code>.</p><h3>Sonarr/Radarr test fails</h3><p>If the apps share a Docker network, use <code>nzbharbor</code> as host. <code>localhost</code> inside the Sonarr/Radarr container points to that container, not NZBHarbor.</p><h3>Import fails after completion</h3><p>Make sure Sonarr/Radarr and NZBHarbor see the same completed download path. A shared <code>/data</code> mount is the simplest layout.</p><h3>Missing articles</h3><p>Add a fill provider with a higher priority number. NZBHarbor tries enabled providers in priority order.</p><h3>PAR/RAR failure</h3><p>The Docker image includes <code>par2</code> and <code>unar</code>. Post-processing errors appear in History.</p></div>
+    </section>
+  </main>
+</div>
+<div id="modal" class="modal"><form id="uploadForm" class="modalbox"><button type="button" class="close" onclick="modal(false)">×</button><h2>Add NZB</h2><label>NZB file<input type="file" name="nzb" accept=".nzb,application/x-nzb" required></label><label>Name (optional)<input name="name"></label><label>Category<select name="category"><option>default</option><option>tv</option><option>movies</option><option>music</option></select></label><button class="primary" type="submit">Add to queue</button><div id="uploadMsg" class="muted"></div></form></div>
+<script src="/app.js"></script>
+</body>
+</html>
