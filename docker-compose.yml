@@ -1,0 +1,14 @@
+services:
+  nzbharbor:
+    build: .
+    image: ghcr.io/kasundigital/nzbharbor:latest
+    container_name: nzbharbor
+    restart: unless-stopped
+    ports:
+      - "6789:6789"
+    environment:
+      NZBHARBOR_CONFIG: /config
+      NZBHARBOR_DOWNLOADS: /downloads
+    volumes:
+      - ./config:/config
+      - ./downloads:/downloads
