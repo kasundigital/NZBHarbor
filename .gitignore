@@ -1,0 +1,5 @@
+/config/
+/downloads/
+*.log
+*.tmp
+.DS_Store
