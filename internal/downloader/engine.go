@@ -22,19 +22,29 @@ import (
 	"github.com/kasundigital/NZBHarbor/internal/store"
 )
 
+const articleAttemptsPerProvider = 3
+
 type Engine struct {
 	cfg    *config.Config
 	store  *store.Store
 	wake   chan struct{}
 	mu     sync.Mutex
 	cancel map[string]context.CancelFunc
+
+	poolMu sync.Mutex
+	pools  map[string]*nntp.Pool
 }
 
 func New(cfg *config.Config, st *store.Store) *Engine {
-	return &Engine{cfg: cfg, store: st, wake: make(chan struct{}, 1), cancel: map[string]context.CancelFunc{}}
+	return &Engine{
+		cfg: cfg, store: st, wake: make(chan struct{}, 1),
+		cancel: map[string]context.CancelFunc{},
+		pools:  map[string]*nntp.Pool{},
+	}
 }
 
 func (e *Engine) Run(ctx context.Context) {
+	defer e.closePools()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -120,6 +130,7 @@ func (e *Engine) Pause(id string) error {
 	}
 	e.mu.Unlock()
 	j.Status = "paused"
+	j.Speed = 0
 	j.UpdatedAt = time.Now()
 	return e.store.Save(j)
 }
@@ -131,6 +142,7 @@ func (e *Engine) Resume(id string) error {
 	}
 	j.Status = "queued"
 	j.Error = ""
+	j.Speed = 0
 	j.UpdatedAt = time.Now()
 	if err := e.store.Save(j); err != nil {
 		return err
@@ -186,6 +198,7 @@ func (e *Engine) process(ctx context.Context, id string) {
 			return
 		}
 		j.Status = "failed"
+		j.Speed = 0
 		j.Error = err.Error()
 		j.UpdatedAt = time.Now()
 		_ = e.store.Save(j)
@@ -194,9 +207,13 @@ func (e *Engine) process(ctx context.Context, id string) {
 
 	if e.cfg.PostProcess {
 		j.Status = "post-processing"
+		j.Speed = 0
 		j.UpdatedAt = time.Now()
 		_ = e.store.Save(j)
-		if err := postprocess.Run(j.Storage); err != nil {
+		if err := postprocess.Run(ctx, j.Storage); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			j.Status = "failed"
 			j.Error = err.Error()
 			j.UpdatedAt = time.Now()
@@ -277,7 +294,7 @@ func (e *Engine) download(ctx context.Context, j *model.Job) error {
 						e.updateProgress(j, &done, t.seg.Bytes, started, &progressMu)
 						continue
 					}
-					data, fetchErr := e.fetch(t.seg.ID)
+					data, fetchErr := e.fetch(ctx, t.seg.ID)
 					if fetchErr != nil {
 						select {
 						case errs <- fetchErr:
@@ -311,7 +328,8 @@ func (e *Engine) download(ctx context.Context, j *model.Job) error {
 		default:
 		}
 
-		dest, err := os.Create(filepath.Join(outDir, file.Filename))
+		destPath := filepath.Join(outDir, file.Filename)
+		dest, err := os.Create(destPath)
 		if err != nil {
 			return err
 		}
@@ -328,6 +346,10 @@ func (e *Engine) download(ctx context.Context, j *model.Job) error {
 				_ = dest.Close()
 				return copyErr
 			}
+		}
+		if err := dest.Sync(); err != nil {
+			_ = dest.Close()
+			return err
 		}
 		if err := dest.Close(); err != nil {
 			return err
@@ -356,36 +378,82 @@ func (e *Engine) updateProgress(j *model.Job, done *atomic.Int64, increment int6
 	_ = e.store.Save(j)
 }
 
-func (e *Engine) fetch(messageID string) ([]byte, error) {
+func (e *Engine) fetch(ctx context.Context, messageID string) ([]byte, error) {
 	var last error
 	servers := append([]config.NewsServer(nil), e.cfg.Servers...)
 	sort.SliceStable(servers, func(i, j int) bool { return servers[i].Priority < servers[j].Priority })
+
 	for _, srv := range servers {
 		if !srv.Enabled {
 			continue
 		}
-		client, err := nntp.Dial(srv)
-		if err != nil {
-			last = fmt.Errorf("%s connect: %w", srv.Name, err)
-			continue
+		pool := e.poolFor(srv)
+
+		for attempt := 1; attempt <= articleAttemptsPerProvider; attempt++ {
+			body, err := pool.Body(ctx, messageID)
+			if err != nil {
+				last = fmt.Errorf("%s article attempt %d/%d: %w", srv.Name, attempt, articleAttemptsPerProvider, err)
+				if nntp.IsArticleMissing(err) {
+					break
+				}
+				if attempt < articleAttemptsPerProvider {
+					if err := retryDelay(ctx, attempt); err != nil {
+						return nil, err
+					}
+				}
+				continue
+			}
+
+			data, err := nntp.DecodeYEnc(body)
+			if err == nil {
+				return data, nil
+			}
+			last = fmt.Errorf("%s decode attempt %d/%d: %w", srv.Name, attempt, articleAttemptsPerProvider, err)
+			if attempt < articleAttemptsPerProvider {
+				if err := retryDelay(ctx, attempt); err != nil {
+					return nil, err
+				}
+			}
 		}
-		body, err := client.Body(messageID)
-		_ = client.Close()
-		if err != nil {
-			last = fmt.Errorf("%s article: %w", srv.Name, err)
-			continue
-		}
-		data, err := nntp.DecodeYEnc(body)
-		if err != nil {
-			last = fmt.Errorf("%s decode: %w", srv.Name, err)
-			continue
-		}
-		return data, nil
 	}
 	if last == nil {
 		last = fmt.Errorf("no enabled Usenet server")
 	}
 	return nil, last
+}
+
+func (e *Engine) poolFor(srv config.NewsServer) *nntp.Pool {
+	key := fmt.Sprintf("%s|%s|%d|%t|%s|%s|%d", srv.Name, srv.Host, srv.Port, srv.TLS, srv.Username, srv.Password, srv.Connections)
+	e.poolMu.Lock()
+	defer e.poolMu.Unlock()
+	if pool := e.pools[key]; pool != nil {
+		return pool
+	}
+	pool := nntp.NewPool(srv)
+	e.pools[key] = pool
+	return pool
+}
+
+func (e *Engine) closePools() {
+	e.poolMu.Lock()
+	pools := e.pools
+	e.pools = map[string]*nntp.Pool{}
+	e.poolMu.Unlock()
+	for _, pool := range pools {
+		pool.Close()
+	}
+}
+
+func retryDelay(ctx context.Context, attempt int) error {
+	delay := time.Duration(attempt) * 500 * time.Millisecond
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func newID() string {
