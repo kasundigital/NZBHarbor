@@ -1,9 +1,10 @@
 services:
   nzbharbor:
-    build: .
-    image: ghcr.io/kasundigital/nzbharbor:latest
+    image: ghcr.io/kasundigital/nzbharbor:edge
     container_name: nzbharbor
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     ports:
       - "6789:6789"
     environment:

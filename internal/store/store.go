@@ -21,7 +21,9 @@ func New(configDir string) (*Store, error) {
 	s := &Store{path: filepath.Join(configDir, "state.json"), jobs: map[string]*model.Job{}}
 	b, err := os.ReadFile(s.path)
 	if err == nil {
-		_ = json.Unmarshal(b, &s.jobs)
+		if err := json.Unmarshal(b, &s.jobs); err != nil {
+			return nil, err
+		}
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -84,9 +86,27 @@ func (s *Store) List() []model.Job {
 }
 
 func (s *Store) flushUnlocked() error {
-	b, _ := json.MarshalIndent(s.jobs, "", "  ")
+	b, err := json.MarshalIndent(s.jobs, "", "  ")
+	if err != nil {
+		return err
+	}
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, s.path)
