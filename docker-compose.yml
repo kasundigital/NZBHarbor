@@ -1,5 +1,6 @@
 services:
   nzbharbor:
+    build: .
     image: ghcr.io/kasundigital/nzbharbor:latest
     container_name: nzbharbor
     restart: unless-stopped
