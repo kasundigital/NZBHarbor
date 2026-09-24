@@ -28,12 +28,24 @@ NZBHarbor is being built around three goals: a simple self-hosted UI, useful fai
 - amd64/arm64 container release workflow
 - GitHub Pages documentation workflow
 
-## Quick start
+## Docker install
+
+### One-command install / update
+
+The same command installs NZBHarbor the first time and updates it later:
 
 ```bash
-git clone https://github.com/kasundigital/NZBHarbor.git
-cd NZBHarbor
-docker compose up -d --build
+curl -fsSL https://raw.githubusercontent.com/kasundigital/NZBHarbor/main/install.sh | sudo bash
+```
+
+During development this installs the `edge` Docker image. Stable releases will use `latest`.
+
+Default files:
+
+```text
+/opt/nzbharbor/docker-compose.yml
+/opt/nzbharbor/config/
+/opt/nzbharbor/downloads/
 ```
 
 Open:
@@ -42,32 +54,65 @@ Open:
 http://YOUR-SERVER-IP:6789
 ```
 
-On first start NZBHarbor generates an API key. Read it with:
+On first start NZBHarbor generates an API key:
 
 ```bash
-cat config/config.json
+sudo cat /opt/nzbharbor/config/config.json
 ```
 
-Enter that key when the web UI asks for it, then open **Servers**, add your Usenet provider, and press **Test**.
+### Docker Compose
+
+```yaml
+services:
+  nzbharbor:
+    image: ghcr.io/kasundigital/nzbharbor:edge
+    container_name: nzbharbor
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    ports:
+      - "6789:6789"
+    environment:
+      NZBHARBOR_CONFIG: /config
+      NZBHARBOR_DOWNLOADS: /downloads
+    volumes:
+      - ./config:/config
+      - ./downloads:/downloads
+```
+
+Start or update:
+
+```bash
+docker compose pull
+docker compose up -d --remove-orphans
+```
+
+### Docker run
+
+```bash
+docker pull ghcr.io/kasundigital/nzbharbor:edge
+
+docker rm -f nzbharbor 2>/dev/null || true
+
+docker run -d \
+  --name nzbharbor \
+  --restart unless-stopped \
+  --init \
+  -p 6789:6789 \
+  -e NZBHARBOR_CONFIG=/config \
+  -e NZBHARBOR_DOWNLOADS=/downloads \
+  -v /opt/nzbharbor/config:/config \
+  -v /opt/nzbharbor/downloads:/downloads \
+  ghcr.io/kasundigital/nzbharbor:edge
+```
 
 ### Useful Docker commands
 
 ```bash
-# Follow logs
 docker logs -f nzbharbor
-
-# Status
-docker compose ps
-
-# Restart
-docker compose restart nzbharbor
-
-# Rebuild after an update
-git pull
-docker compose up -d --build
-
-# Stop
-docker compose down
+docker ps --filter name=nzbharbor
+cd /opt/nzbharbor && docker compose restart
+cd /opt/nzbharbor && docker compose down
 ```
 
 ## Recommended media-stack paths
@@ -149,7 +194,7 @@ Common causes are wrong NNTP TLS/port settings, provider authentication, missing
 
 ## Current limitations
 
-v0.1 prioritizes correctness and inspectability over peak speed. It currently opens an NNTP connection per article instead of maintaining a reusable connection pool. Connection pooling, article CRC validation, richer PAR/RAR edge-case handling, bandwidth scheduling, richer diagnostics, notifications, and packaging for other platforms are planned.
+NZBHarbor is still a development release. Connection pooling, per-provider limits, retries, NNTP timeouts, and yEnc CRC/size validation are now part of the stabilization branch, but more work remains around disk-space safety, article-level health tracking, PAR/RAR edge cases, post-processing retry, stress testing, and deeper Servarr compatibility.
 
 See [ROADMAP.md](ROADMAP.md).
 
