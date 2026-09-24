@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 APP_DIR="${NZBHARBOR_DIR:-/opt/nzbharbor}"
 IMAGE="${NZBHARBOR_IMAGE:-ghcr.io/kasundigital/nzbharbor}"
-TAG="${NZBHARBOR_TAG:-latest}"
+TAG="${NZBHARBOR_TAG:-edge}"
 PORT="${NZBHARBOR_PORT:-6789}"
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -57,4 +57,4 @@ echo "Install directory: ${APP_DIR}"
 echo "Config: ${APP_DIR}/config"
 echo "Downloads: ${APP_DIR}/downloads"
 echo
-echo "Use the same curl command again any time to update."
+echo "Run the same curl command again to update."
